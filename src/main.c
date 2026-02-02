@@ -4,7 +4,8 @@
 
 #define INPUT_BUFFER_SIZE 2048
 
-#define MAX(x,y) ((x)>(y))?(x):(y)
+#define MAX(x,y) (((x)>(y))?(x):(y))
+#define MIN(x,y) (((x)<(y))?(x):(y))
 
 struct sSillon {
 	int days[3];
@@ -76,6 +77,15 @@ int csl_exists(tCsl list, int id) {
 		current = current->next;
 	};
 	return false;
+}
+tSillon csl_get_nth(tCsl list, int n) {
+	tCsl current = list;
+	while (current != NULL && n > 0) {
+		n--;
+		current = current->next;
+	}
+	if (current != NULL) return current->sillon;
+	return NULL;
 }
 tSillon csl_find(tCsl list, int id) {
 	tCsl current = list;
@@ -178,6 +188,34 @@ tMatiere cml_find(tCml  list, int id) {
 	}
 	return NULL;
 }
+int cml_size(tCml list) {
+	int count = 0;
+	tCml current = list;
+	while (current != NULL) {
+		count++;
+		current = current->next;
+	}
+	return count;
+}
+tMatiere * cml_to_array(tCml list, int * size) {
+	*size = cml_size(list);
+	if (size == 0) return NULL;
+
+	tMatiere * arr;
+	if ((arr = malloc(sizeof(tMatiere) * *size)) == NULL) {
+		perror("CML_to_array : Allocation error");
+		return NULL;
+	}
+	int i = 0;
+	tCml current = list;
+	while (current != NULL) {
+		arr[i] = current->matiere;
+		current = current->next;
+		i++;
+	}
+
+	return arr;
+}
 void cml_iter(tCml list, void callback(tMatiere matiere)) {
 	tCml current = list;
 	while (current != NULL) {
@@ -196,11 +234,36 @@ void cml_destroy(tCml * list) {
 
 
 int global_id_count = 0;
+int fetch_first_only = 1;
 
 int strsize(char * input) {
 	int i = 0;
 	while (input[++i] != '\0') {}
 	return i;
+}
+
+void sort_sillon(tSillon sillon) {
+	int i = 0;
+	while (i < 2) {
+		int m = i;
+		int j = i;
+		while (j < 3) {
+			if (sillon->days[j] < sillon->days[m]) {
+				m = j;
+			}
+			j++;
+		}
+		int temp = sillon->days[m];
+		sillon->days[m] = sillon->days[i];
+		sillon->days[i] = temp;
+		temp = sillon->starts[m];
+		sillon->starts[m] = sillon->starts[i];
+		sillon->starts[i] = temp;
+		temp = sillon->ends[m];
+		sillon->ends[m] = sillon->ends[i];
+		sillon->ends[i] = temp;
+		i++;
+	}
 }
 
 tSillon create_sillon(int starts[3], int ends[3], int days[3]) {
@@ -218,6 +281,8 @@ tSillon create_sillon(int starts[3], int ends[3], int days[3]) {
 	}
 
 	sillon->id = global_id_count++;
+
+	sort_sillon(sillon);
 
 	return sillon;
 }
@@ -367,7 +432,95 @@ char * join_name(char ** input, int argc, int offset) {
 }
 
 void commands_help() {
-	printf("This is the \x1b[94medt-deduct\x1b[0m : here are the commands you can use :\n    sillon create \x1b[90m[day 1] [day2] [day3] [start 1] [start 2] [start 3] [end 1] [end 2] [end3]\x1b[0m\n    silview\n    matiere create \x1b[90m[group] [name]\x1b[0m\n    matiere addsill \x1b[90m[ID matiere] [ID sillon]\x1b[0m\n");
+	printf("This is the \x1b[94medt-deduct\x1b[0m : here are the commands you can use :\n    sillon create \x1b[90m[day 1] [day2] [day3] [start 1] [start 2] [start 3] [end 1] [end 2] [end3]\x1b[0m\n    silview\n    matiere create \x1b[90m[group] [name]\x1b[0m\n    matiere addsill \x1b[90m[ID matiere] [ID sillon]\x1b[0m\n    compute\n    fetchfirst \x1b[94mActive/désactive le premier résultat seulement\x1b[0m\n");
+}
+
+int check_edt_valid(tSillon * array, int size) {
+	int encountered[size];
+	int i = 0;
+	while (i < size) {
+		encountered[i] = array[i]->id;
+		int j = 0;
+		while (j < i) {
+			if (encountered[j] == encountered[i]) {
+				return 0;
+			}
+			j++;
+		}
+		i++;
+	}
+	return 1;
+}
+
+void increase(int * tab, int * mods, int size) {
+	int i = size - 1;
+	while (i-- >= 0) {
+		tab[i + 1] = (tab[i + 1] + 1) % mods[i + 1];
+		if (tab[i + 1] != 0) {
+			break;
+		}
+	}
+}
+
+void display_valid(tMatiere * mats, tSillon * sillons, int size) {
+	int i = 0;
+	while (i++ < size) {
+		printf("\x1b[91m%s\x1b[0m (\x1b[90mgroupe %d\x1b[0m) (\x1b[92m%d\x1b[0m)\n  ", mats[i - 1]->name, mats[i - 1]->group, mats[i - 1]->id);
+		display_sillon(sillons[i - 1]);
+	}
+}
+
+void commands_compute(tCml matslist) {
+	int size;
+	tMatiere * mats;
+	if ((mats = cml_to_array(matslist, &size)) == NULL) {
+		printf("\x1b[31mSomething went wrong\x1b[0m\n");
+		return;
+	}
+
+	tSillon * copy;
+	if ((copy = malloc(sizeof(struct sSillon) * size)) == NULL) {
+		perror("commands_compute : Allocation error");
+		return;
+	}
+
+	int max = 1;
+	int i = 0;
+	int modulos[size];
+	int indexes[size];
+	while (i < size) {
+		int len = csl_size(mats[i]->sillons_list);
+		if (len == 0) {
+			printf("\x1b[31mMatiere \x1b[33m%d\x1b[31m has no sillon", i);
+			return;
+		}
+		modulos[i] = len;
+		max *= len;
+		indexes[i] = 0;
+		i++;
+	}
+
+	i = 0;
+	while (i++ < max) {
+		int j = 0;
+		while (j < size) {
+			copy[j] = csl_get_nth(mats[j]->sillons_list, indexes[j]);
+			j++;
+		}
+
+		increase(indexes, modulos, size);
+		int valid = check_edt_valid(copy, size);
+
+		if (valid) {
+			printf("Found a valid model\n");
+			display_valid(mats, copy, size);
+
+			if (fetch_first_only) {
+				printf("Fetching only the first result, escaping.\n   \x1b[33mHint :\x1b[0m use the \x1b[90mfetchfirst\x1b[0m command to disable this behavior\n");
+				break;
+			}
+		}
+	}
 }
 
 tMatiere commands_matiere(char ** args, size_t argc, tCml * matslist, tCsl * sillslist) {
@@ -483,8 +636,8 @@ tSillon commands_sillon(char ** args, size_t argc, tCsl * sillslist) {
 				return NULL;
 			}
 
-			s[i] = starts[i] * days[i];
-			e[i] = ends[i] * days[i];
+			s[i] = starts[i] * days[i] * 24;
+			e[i] = ends[i] * days[i] * 24;
 
 			i++;
 		}
@@ -501,6 +654,31 @@ tSillon commands_sillon(char ** args, size_t argc, tCsl * sillslist) {
 			return NULL;
 		}
 
+		tCsl current_sil = *sillslist;
+		while (current_sil != NULL) {
+			int l = 0;
+			while (l < 5) {
+				int j = 0;
+				int ia = -1, ib = -1;
+				while (j < 3) {
+					if (sillon->days[j] == l) ia = j;
+					if (current_sil->sillon->days[j] == l) ib = j;
+					j++;
+				}
+
+				if (ia != -1 && ib != -1) {
+					int overlap = MAX(0, MIN(sillon->ends[ia], current_sil->sillon->ends[ib]) - MAX(sillon->starts[ia], current_sil->sillon->starts[ib]));
+					if (overlap > 0) {
+						printf("\x1b[31mOverlap detect with sillon \x1b[33m%d\x1b[31m at \x1b[33m%d\x1b[0m\n", current_sil->sillon->id, ia);
+						return NULL;
+					}
+				}
+
+				l++;
+			}
+			current_sil = current_sil->next;
+		}
+
 		display_sillon(sillon);
 		csl_append(sillslist, sillon);
 		return sillon;
@@ -509,6 +687,7 @@ tSillon commands_sillon(char ** args, size_t argc, tCsl * sillslist) {
 	}
 
 	return NULL;
+
 }
 
 int main() {
@@ -553,6 +732,20 @@ int main() {
 		if (strcmp(args[0], "matiere") == 0) {
 			commands_matiere(args, argc, &matieres, &sills);
 		}
+		if (strcmp(args[0], "compute") == 0) {
+			commands_compute(matieres);
+		}
+		if (strcmp(args[0], "fetchfirst") == 0) {
+			fetch_first_only = !fetch_first_only;
+			printf("New value: \x1b[90m%d\x1b[0m\n", fetch_first_only);
+		}
+		if (strcmp(args[0], "matview") == 0) {
+			if (cml_size(matieres) == 0) {
+				printf("0 matière\n");
+			} else {
+				cml_iter(matieres, display_matiere);
+			}
+		}
 
 		if (strcmp(args[0], "silview") == 0) {
 			if (csl_size(sills) == 0) {
@@ -568,4 +761,5 @@ int main() {
 	if (buffer != NULL) free(buffer);
 
 	csl_destroy(&sills);
+	cml_destroy(&matieres);
 }
