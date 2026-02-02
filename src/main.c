@@ -500,6 +500,7 @@ void commands_compute(tCml matslist) {
 		i++;
 	}
 
+	int successes = 0;
 	i = 0;
 	while (i++ < max) {
 		int j = 0;
@@ -514,6 +515,7 @@ void commands_compute(tCml matslist) {
 		if (valid) {
 			printf("Found a valid model\n");
 			display_valid(mats, copy, size);
+			successes++;
 
 			if (fetch_first_only) {
 				printf("Fetching only the first result, escaping.\n   \x1b[33mHint :\x1b[0m use the \x1b[90mfetchfirst\x1b[0m command to disable this behavior\n");
@@ -521,6 +523,8 @@ void commands_compute(tCml matslist) {
 			}
 		}
 	}
+
+	printf("Found \x1b[33m%d\x1b[0m valid models\n", successes);
 }
 
 tMatiere commands_matiere(char ** args, size_t argc, tCml * matslist, tCsl * sillslist) {
