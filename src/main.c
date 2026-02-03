@@ -3,6 +3,8 @@
 #include <string.h>
 
 #define INPUT_BUFFER_SIZE 2048
+#define SILLONS_SAVE_PATH "sillons.txt"
+#define MATIERES_SAVE_PATH "matieres.txt"
 
 #define MAX(x,y) (((x)>(y))?(x):(y))
 #define MIN(x,y) (((x)<(y))?(x):(y))
@@ -432,7 +434,7 @@ char * join_name(char ** input, int argc, int offset) {
 }
 
 void commands_help() {
-	printf("This is the \x1b[94medt-deduct\x1b[0m : here are the commands you can use :\n    sillon create \x1b[90m[day 1] [day2] [day3] [start 1] [start 2] [start 3] [end 1] [end 2] [end3]\x1b[0m\n    silview\n    matiere create \x1b[90m[group] [name]\x1b[0m\n    matiere addsill \x1b[90m[ID matiere] [ID sillon]\x1b[0m\n    compute\n    fetchfirst \x1b[94mActive/désactive le premier résultat seulement\x1b[0m\n");
+	printf("This is the \x1b[94medt-deduct\x1b[0m : here are the commands you can use :\n    sillon create \x1b[90m[day 1] [day2] [day3] [start 1] [start 2] [start 3] [end 1] [end 2] [end3]\x1b[0m\n    silview\n    matview\n    matiere create \x1b[90m[group] [name]\x1b[0m\n    matiere addsill \x1b[90m[ID matiere] [ID sillon]\x1b[0m\n    compute\n    fetchfirst \x1b[94mActive/désactive le premier résultat seulement\x1b[0m\n    export\n    import\n    clear\n    exit\n");
 }
 
 int check_edt_valid(tSillon * array, int size) {
@@ -462,12 +464,230 @@ void increase(int * tab, int * mods, int size) {
 	}
 }
 
+int int_size(int input) {
+	if (input == 0) return 1;
+
+    int size = 0;
+    while (input > 0) {
+        size++;
+        input /= 10;
+    }
+    return size;
+}
+
 void display_valid(tMatiere * mats, tSillon * sillons, int size) {
 	int i = 0;
 	while (i++ < size) {
 		printf("\x1b[91m%s\x1b[0m (\x1b[90mgroupe %d\x1b[0m) (\x1b[92m%d\x1b[0m)\n  ", mats[i - 1]->name, mats[i - 1]->group, mats[i - 1]->id);
 		display_sillon(sillons[i - 1]);
 	}
+}
+
+void commands_export(tCml * matieres, tCsl * sillons) {
+    FILE * stream;
+    if ((stream = fopen(SILLONS_SAVE_PATH, "wb")) == NULL) {
+        perror("Coomands_export : Open sillons error");
+        return;
+    }
+
+    tCsl current = *sillons;
+    while (current != NULL) {
+        struct sSillon buffer = *(current->sillon);
+
+        int transform[10] = { buffer.id, buffer.starts[0], buffer.starts[1], buffer.starts[2], buffer.ends[0], buffer.ends[1], buffer.ends[2], buffer.days[0], buffer.days[1], buffer.days[2] };
+
+        if (fwrite(&transform, sizeof(int), 10, stream) == 0) {
+            perror("Commands_export : Write error");
+            return;
+        }
+        current = current->next;
+    }
+
+    fclose(stream);
+    if ((stream = fopen(MATIERES_SAVE_PATH, "wt")) == NULL) {
+        perror("commands_export : Open matiere error");
+        return;
+    }
+
+    tCml currentm = *matieres;
+    while (currentm != NULL) {
+        struct sMatiere buffer = *(currentm->matiere);
+
+        int tsize = strsize(buffer.name);
+        int ssize = csl_size(buffer.sillons_list);
+
+        fprintf(stream, "%d %d %d %d\n", buffer.id, buffer.group, tsize, ssize);
+
+        tCsl currentl = buffer.sillons_list;
+        while (currentl != NULL) {
+            fprintf(stream, "%d ", currentl->sillon->id);
+            currentl = currentl->next;
+        }
+        fprintf(stream, "%s\n", buffer.name);
+        
+        currentm = currentm->next;
+    }
+
+    fclose(stream);
+}
+void commands_import(tCml * matieres, tCsl * sillons) {
+	int appended_matieres = 0, appended_sillons = 0;
+    FILE * stream;
+    if ((stream = fopen(SILLONS_SAVE_PATH, "rb")) == NULL) {
+        printf("\x1b[91mNo save file found\x1b[0m\n");
+        return;
+    }
+
+    int input[10];
+    while (fread(&input, sizeof(int), 10, stream) > 0) {
+        tSillon sillon;
+        if ((sillon = malloc(sizeof(struct sSillon))) == NULL) {
+            perror("commands_import : Sillon Allocation error");
+            fclose(stream);
+            return;
+        }
+        int i = 0;
+        while (i < 9) {
+            int * arr[3] = { sillon->starts, sillon->ends, sillon->days };
+            int * target = arr[i / 3];
+
+            target[i % 3] = input[i + 1];
+            i++;
+        }
+        sillon->id = input[0];
+
+        if (csl_exists(*sillons, sillon->id) == 1) {
+            printf("Sillon \x1b[33m%d\x1b[0m already registered, skipping\n");
+            continue;
+        }
+
+        csl_append(sillons, sillon);
+		appended_sillons++;
+    }
+    fclose(stream);
+    if ((stream = fopen(MATIERES_SAVE_PATH, "rt")) == NULL) {
+        printf("\x1b[91mCannot open matieres save file");
+        return;
+    }
+
+    char * buffer;
+    if ((buffer = calloc(256, sizeof(char))) == NULL) {
+        perror("Commands_import : Buffer allocation error");
+        fclose(stream);
+        return;
+    }
+    while (fgets(buffer, 256, stream) != NULL) {
+        int id, group, tsize, ssize;
+        if (sscanf(buffer, "%d %d %d %d", &id, &group, &tsize, &ssize) != 4) {
+            printf("Save malformed... Aborting\n");
+            free(buffer);
+            fclose(stream);
+            return;
+		}
+
+		int total_size = 1 + tsize + ssize * 5;
+		char * line;
+		if ((line = calloc(total_size, sizeof(char))) == NULL) {
+			perror("Comands_import : line allocation error");
+			free(buffer);
+			fclose(stream);
+			return;
+		}
+
+		if (fgets(line, total_size, stream) == NULL) {
+			perror("Commands_import : Cannot read line");
+			free(buffer);
+			free(line);
+			fclose(stream);
+			return;
+		}
+
+		if (cml_exists(*matieres, id)) {
+			printf("Matiere ID \x1b[33m%d\x1b[0m already registered... Skipping...\n", id);
+			free(line);
+			continue;
+		}
+
+		tMatiere matiere;
+		if ((matiere = malloc(sizeof(struct sMatiere))) == NULL) {
+			perror("Commands_import : Matiere allocation error");
+			free(buffer);
+			free(line);
+			fclose(stream);
+			return;
+		}
+
+		matiere->name = NULL;
+		matiere->group = group;
+		matiere->id = id;
+		matiere->sillons_list = NULL;
+
+		int offset = 0;
+		int i = 0;
+		int skip = 0;
+		while (i < ssize) {
+			int read;
+			if (sscanf(line + offset, "%d", &read) == 0) {
+				printf("Cannot read sillon \x1b[33m%d\x1b[0m of matiere. Skipping\n", i);
+				skip = 1;
+				break;
+			}
+			i++;
+			offset += 1 + int_size(read);
+
+			tSillon matching;
+			if ((matching = csl_find(*sillons, read)) == NULL) {
+				printf("Cannot find sillon id \x1b[33m%d\x1b[0m. SKipping.\n", read);
+				skip = 1;
+				break;
+			}
+			if (csl_exists(matiere->sillons_list, read)) {
+				printf("Sillon already in matiere... Skipping...\n");
+				skip = 1;
+				break;
+			}
+
+			csl_append(&matiere->sillons_list, matching);
+		}
+
+		if (skip) {
+			free(line);
+			continue;
+		}
+
+		char * name;
+		if ((name = calloc(tsize + 1, sizeof(char))) == NULL) {
+			perror("Commands_import : Name allocation error");
+			free(line);
+			free(buffer);
+			fclose(stream);
+			return;
+		}
+
+		int j = 0;
+		while (j < tsize && (line + offset)[j] != '\n' && (line + offset)[j] != '\0') {
+			name[j] = (line + offset)[j];
+			j++;
+		}
+
+		matiere->name = name;
+		if (cml_exists(*matieres, id)) {
+			printf("Matiere \x1b[33m%d\x1b[0m already registered, skipping this one\n", id);
+			free(name);
+			free(line);
+			continue;
+		}
+
+		cml_append(matieres, matiere);
+		appended_matieres++;
+		free(line);
+    }
+
+    free(buffer);
+
+    fclose(stream);
+
+	printf("Loaded \x1b[33m%d\x1b[0m matieres and \x1b[33m%d\x1b[0m sillons\n", appended_matieres, appended_sillons);
 }
 
 void commands_compute(tCml matslist) {
@@ -729,34 +949,36 @@ int main() {
 
 		if (strcmp(args[0], "help") == 0) {
 			commands_help();
-		}
-		if (strcmp(args[0], "sillon") == 0) {
+		} else if (strcmp(args[0], "sillon") == 0) {
 			commands_sillon(args, argc, &sills);
-		}
-		if (strcmp(args[0], "matiere") == 0) {
+		} else if (strcmp(args[0], "matiere") == 0) {
 			commands_matiere(args, argc, &matieres, &sills);
-		}
-		if (strcmp(args[0], "compute") == 0) {
+		} else if (strcmp(args[0], "compute") == 0) {
 			commands_compute(matieres);
-		}
-		if (strcmp(args[0], "fetchfirst") == 0) {
+		} else if (strcmp(args[0], "fetchfirst") == 0) {
 			fetch_first_only = !fetch_first_only;
 			printf("New value: \x1b[90m%d\x1b[0m\n", fetch_first_only);
-		}
-		if (strcmp(args[0], "matview") == 0) {
+		} else if (strcmp(args[0], "import") == 0) {
+            commands_import(&matieres, &sills);
+        } else if (strcmp(args[0], "export") == 0) {
+            commands_export(&matieres, &sills);
+        } else if (strcmp(args[0], "exit") == 0) {
+            printf("Exiting...\n");
+            return 0;
+        } else if (strcmp(args[0], "matview") == 0) {
 			if (cml_size(matieres) == 0) {
 				printf("0 matière\n");
 			} else {
 				cml_iter(matieres, display_matiere);
 			}
-		}
-
-		if (strcmp(args[0], "silview") == 0) {
+		} else if (strcmp(args[0], "silview") == 0) {
 			if (csl_size(sills) == 0) {
 				printf("0 sillons\n");
 			} else {
 				csl_iter(sills, display_sillon);
 			}
+		} else if (strcmp(args[0], "clear") == 0) {
+			printf("\e[1;1H\e[2J");
 		}
 
 		free(args);
