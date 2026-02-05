@@ -859,17 +859,45 @@ tSillon commands_sillon(char ** args, size_t argc, tCsl * sillslist) {
 				printf("\x1b[91mStarts must be greater than ends\x1b[0m\n");
 				return NULL;
 			}
-
-			s[i] = starts[i] * days[i] * 24;
-			e[i] = ends[i] * days[i] * 24;
-
 			i++;
 		}
 
-		int overlap = MAX(0, minimum(e, 3) - maximum(s, 3));
-		if (overlap > 0) {
-			printf("\x1b[31mOverlap detected\x1b[0m\n");
-			return NULL;
+		int j = 0;
+		while (j < 5) {
+			int indexes[3] = { -1, -1, -1 };
+			int k = 0;
+			int last = 0;
+			while (k++ < 3) {
+				if (days[k - 1] == j) indexes[last++] = k - 1;
+			}
+
+			printf("j = %d, [%d %d %d]\n", j, indexes[0], indexes[1], indexes[2]);
+			printf("last = %d\n", last);
+
+			if (last >= 2) {
+				int l = 0;
+				while (l < last) {
+					int m = 0;
+					while (m < last) {
+						if (m == l) {
+							m++;
+							continue;
+						}
+
+						printf("ends[l] = %d, ends[m] = %d, starts[l] = %d, starts[m] = %d\n", ends[l], ends[m], starts[l], starts[m]);
+
+						int overlap = MAX(0, MIN(ends[l], ends[m]) - MAX(starts[l], starts[m]));
+						if (overlap > 0) {
+							printf("\x1b[91mOverlap detected\x1b[0m\n");
+							return NULL;
+						}
+
+						m++;
+					}
+					l++;
+				}
+			}
+			j++;
 		}
 
 		tSillon sillon;
